@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AIOps 全量分析</title>
+    <link rel="stylesheet" href="/assets/styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">AIOps MCP Analyzer</p>
+          <h1>主机告警全量分析</h1>
+        </div>
+        <div class="target-panel">
+          <label>
+            目标主机
+            <input id="targetInput" placeholder="默认分析当前服务器" />
+          </label>
+          <label>
+            空间
+            <input id="spaceInput" value="bkcc__131" />
+          </label>
+          <label class="switch-field">
+            DeepSeek 归因
+            <input id="llmToggle" type="checkbox" />
+          </label>
+          <button id="refreshBtn" type="button">刷新告警</button>
+          <button id="analyzeBtn" class="primary" type="button">全量分析</button>
+        </div>
+      </header>
+
+      <section class="status-strip" aria-live="polite">
+        <div>
+          <span class="dot" id="statusDot"></span>
+          <span id="statusText">等待分析</span>
+        </div>
+        <time id="generatedAt"></time>
+      </section>
+
+      <section id="llmPanel" class="llm-panel" hidden>
+        <div class="llm-header">
+          <strong>LLM 归因结论</strong>
+          <span id="llmMeta"></span>
+        </div>
+        <p id="llmSummary"></p>
+        <p id="llmRootCause"></p>
+      </section>
+
+      <section class="section-band">
+        <div class="section-heading">
+          <h2>处置建议</h2>
+          <span id="actionCount">0 条</span>
+        </div>
+        <div id="actions" class="action-list"></div>
+      </section>
+
+      <section class="section-band">
+        <div class="section-heading">
+          <h2>MCP 补查证据</h2>
+          <span id="evidenceCount">0 条</span>
+        </div>
+        <div id="evidence" class="evidence-list"></div>
+      </section>
+    </main>
+
+    <template id="actionTemplate">
+      <article class="action-card">
+        <div class="action-meta">
+          <span class="badge"></span>
+          <strong class="title"></strong>
+          <span class="eta"></span>
+        </div>
+        <p class="reason"></p>
+        <p class="suggestion"></p>
+      </article>
+    </template>
+
+    <template id="evidenceTemplate">
+      <article class="evidence-card">
+        <div class="evidence-title">
+          <strong class="tool"></strong>
+          <span class="target"></span>
+        </div>
+        <p class="summary"></p>
+        <pre class="metrics"></pre>
+      </article>
+    </template>
+
+    <script src="/assets/app.js"></script>
+  </body>
+</html>

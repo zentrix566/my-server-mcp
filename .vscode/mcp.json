@@ -1,0 +1,8 @@
+{
+  "servers": {
+    "aliyunOps": {
+      "type": "sse",
+      "url": "http://服务器IP:8000/sse"
+    }
+  }
+}
