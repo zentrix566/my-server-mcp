@@ -166,6 +166,108 @@ MCP 客户端配置示例：
 
 ## API 使用方法
 
+## 相关性与置信度计算方法
+
+系统会为每条 MCP 补查证据计算 `relevance`，并为整次分析计算 `confidence`。
+
+### MCP 工具相关性
+
+每条 evidence 会增加：
+
+```json
+{
+  "relevance": {
+    "score": 82.5,
+    "label": "high"
+  }
+}
+```
+
+`score` 是 0 到 100 的百分制分数，`label` 按分数分为：
+
+```text
+high:   score >= 80
+medium: score >= 60 且 < 80
+low:    score < 60
+```
+
+相关性计算由三部分组成：
+
+```text
+相关性 = 工具基础权重 * 0.62 + 指标信号强度 * 100 * 0.38 + 场景加权
+```
+
+工具基础权重用于表达该 MCP 工具对主机告警分析的天然重要性：
+
+```text
+get_host_cpu         95
+get_host_system_env  95
+get_host_workload    92
+get_host_disk        92
+get_disk_io          82
+get_top_processes    82
+get_host_inode       78
+find_large_log_files 68
+space                55
+```
+
+指标信号强度根据工具采到的数据动态计算。例如：
+
+- `get_host_cpu`：CPU 使用率高或 iowait 高时相关性升高。
+- `get_host_workload`：load15 或 per_cpu_load 偏高时相关性升高。
+- `get_host_system_env`：blocked 进程、内存、swap 异常时相关性升高。
+- `get_host_disk`：磁盘使用率接近或超过阈值时相关性升高。
+- `get_host_inode`：inode 使用率高时相关性升高。
+- `find_large_log_files`：存在大日志文件时相关性升高。
+
+如果工具调用失败，相关性最高限制为 45%，避免失败证据被误认为强证据。
+
+### 最终结果置信度
+
+完整分析返回中会增加：
+
+```json
+{
+  "confidence": {
+    "score": 86.4,
+    "label": "high",
+    "source": "llm+evidence",
+    "components": {
+      "evidence_coverage": 100.0,
+      "avg_relevance": 74.2,
+      "rule_confidence": 72.0,
+      "llm_confidence": 95.0
+    }
+  }
+}
+```
+
+置信度同样是 0 到 100 的百分制分数，`label` 分级规则和相关性一致。
+
+如果 DeepSeek LLM 归因成功：
+
+```text
+最终置信度 = LLM 置信度 * 0.50 + 证据覆盖率 * 0.30 + 平均相关性 * 0.20
+```
+
+如果 DeepSeek 调用失败并回退到规则分析：
+
+```text
+最终置信度 = 规则置信度 * 0.45 + 证据覆盖率 * 0.35 + 平均相关性 * 0.20
+```
+
+其中：
+
+- `LLM 置信度`：DeepSeek 返回 JSON 中的 `confidence`。
+- `证据覆盖率`：关键 MCP 工具成功数量 / 关键 MCP 工具总数。
+- `平均相关性`：所有 evidence 的 relevance 平均值。
+- `规则置信度`：根据规则命中的严重程度给出，critical 为 86%，warning 为 78%，normal 为 72%。
+
+前端展示方式：
+
+- 处置建议卡片右下角展示整次分析的 `置信度 xx%`。
+- MCP 补查证据卡片右下角展示该工具证据的 `相关性 xx%`。
+
 规则分析：
 
 ```bash

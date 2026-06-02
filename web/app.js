@@ -1,5 +1,6 @@
 const state = {
   loading: false,
+  confidence: null,
 };
 
 const elements = {
@@ -22,6 +23,10 @@ const elements = {
   actionTemplate: document.querySelector("#actionTemplate"),
   evidenceTemplate: document.querySelector("#evidenceTemplate"),
 };
+
+function percent(value) {
+  return Math.round(Number(value || 0));
+}
 
 function setStatus(text, tone = "") {
   elements.statusText.textContent = text;
@@ -52,6 +57,13 @@ function renderEmpty(container, text) {
   container.replaceChildren(node);
 }
 
+function addCornerTag(card, kind, label, score) {
+  const tag = document.createElement("span");
+  tag.className = `corner-tag ${kind} ${label || "medium"}`;
+  tag.textContent = `${kind === "confidence" ? "置信度" : "相关性"} ${percent(score)}%`;
+  card.appendChild(tag);
+}
+
 function renderActions(actions) {
   elements.actionCount.textContent = `${actions.length} 条`;
   if (!actions.length) {
@@ -68,6 +80,9 @@ function renderActions(actions) {
     fragment.querySelector(".eta").textContent = action.eta || "";
     fragment.querySelector(".reason").textContent = action.reason || "";
     fragment.querySelector(".suggestion").textContent = action.suggestion || "";
+    if (state.confidence) {
+      addCornerTag(card, "confidence", state.confidence.label, state.confidence.score);
+    }
     return fragment;
   });
 
@@ -82,8 +97,8 @@ function renderLlm(llm) {
 
   elements.llmPanel.hidden = false;
   if (llm.success) {
-    const confidence = Math.round((llm.confidence || 0) * 100);
-    elements.llmMeta.textContent = `${llm.provider || "deepseek"} / ${llm.model || ""} / ${confidence}%`;
+    const confidence = percent(llm.confidence * 100);
+    elements.llmMeta.textContent = `${llm.provider || "deepseek"} / ${llm.model || ""} / LLM ${confidence}%`;
     elements.llmSummary.textContent = llm.summary || "LLM 未返回摘要。";
     elements.llmRootCause.textContent = `根因判断：${llm.root_cause || "证据不足，无法确认根因。"}`;
   } else {
@@ -108,6 +123,9 @@ function renderEvidence(evidence) {
     fragment.querySelector(".target").textContent = item.target || "";
     fragment.querySelector(".summary").textContent = item.summary || "";
     fragment.querySelector(".metrics").textContent = JSON.stringify(item.metrics || {}, null, 2);
+    if (item.relevance) {
+      addCornerTag(card, "relevance", item.relevance.label, item.relevance.score);
+    }
     return fragment;
   });
 
@@ -139,6 +157,7 @@ async function analyze() {
     }
 
     const data = await response.json();
+    state.confidence = data.confidence || null;
     renderLlm(data.llm);
     renderActions(data.actions || []);
     renderEvidence(data.evidence || []);

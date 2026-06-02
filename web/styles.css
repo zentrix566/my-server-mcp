@@ -232,6 +232,7 @@ button:disabled {
 
 .action-card,
 .evidence-card {
+  position: relative;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.88);
@@ -305,6 +306,8 @@ button:disabled {
 }
 
 .suggestion {
+  padding-right: 100px;
+  padding-bottom: 4px;
   color: #516079;
 }
 
@@ -331,9 +334,41 @@ button:disabled {
 
 .summary {
   margin-top: 9px;
+  padding-right: 96px;
   color: var(--muted);
   font-size: 13px;
   line-height: 1.7;
+}
+
+.corner-tag {
+  position: absolute;
+  right: 12px;
+  bottom: 10px;
+  border-radius: 5px;
+  padding: 3px 7px;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.2;
+  pointer-events: none;
+}
+
+.corner-tag.high {
+  background: var(--green-soft);
+  color: var(--green);
+}
+
+.corner-tag.medium {
+  background: var(--amber-soft);
+  color: var(--amber);
+}
+
+.corner-tag.low {
+  background: var(--red-soft);
+  color: var(--red);
+}
+
+.action-card .corner-tag {
+  bottom: 12px;
 }
 
 pre {

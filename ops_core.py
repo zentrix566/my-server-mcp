@@ -324,6 +324,179 @@ def _top_disk_percent(evidence: list[dict[str, Any]]) -> tuple[float, str]:
     return float(top.get("percent") or 0.0), str(top.get("mountpoint") or "/")
 
 
+def _relevance_signal(item: dict[str, Any]) -> float:
+    tool = item.get("tool")
+    metrics = item.get("metrics") or {}
+
+    if not item.get("success", False):
+        return 0.25
+
+    if tool == "space":
+        return 0.5
+
+    if tool == "get_host_workload":
+        load15 = float(metrics.get("load15") or 0.0)
+        per_cpu_load = float(metrics.get("per_cpu_load") or 0.0)
+        if load15 >= 1 or per_cpu_load >= 1.5:
+            return 1.0
+        return 0.62
+
+    if tool == "get_host_cpu":
+        usage = float(metrics.get("usage") or 0.0)
+        iowait = float(metrics.get("iowait") or 0.0)
+        if usage >= 80 or iowait >= 10:
+            return 1.0
+        if usage >= 60 or iowait >= 3:
+            return 0.82
+        return 0.65
+
+    if tool == "get_host_system_env":
+        blocked = int(metrics.get("proc_blocked_current") or 0)
+        memory = float(metrics.get("memory_percent") or 0.0)
+        swap = float(metrics.get("swap_percent") or 0.0)
+        if blocked >= 4 or memory >= 90 or swap >= 60:
+            return 1.0
+        if memory >= 75 or swap >= 30:
+            return 0.78
+        return 0.66
+
+    if tool == "get_host_disk":
+        disks = metrics.get("disks") or []
+        top = max((float(disk.get("percent") or 0.0) for disk in disks), default=0.0)
+        if top >= 90:
+            return 1.0
+        if top >= 80:
+            return 0.88
+        if top >= 70:
+            return 0.74
+        return 0.62
+
+    if tool == "get_host_inode":
+        inodes = metrics.get("inodes") or []
+        top = max((float(inode.get("percent") or 0.0) for inode in inodes), default=0.0)
+        if top >= 90:
+            return 1.0
+        if top >= 80:
+            return 0.86
+        return 0.56
+
+    if tool == "get_disk_io":
+        devices = metrics.get("devices") or []
+        return 0.68 if devices else 0.35
+
+    if tool == "get_top_processes":
+        processes = metrics.get("processes") or []
+        max_cpu = max((float(proc.get("cpu_percent") or 0.0) for proc in processes), default=0.0)
+        max_memory = max((float(proc.get("memory_percent") or 0.0) for proc in processes), default=0.0)
+        if max_cpu >= 50 or max_memory >= 25:
+            return 0.92
+        return 0.63
+
+    if tool == "find_large_log_files":
+        files = metrics.get("files") or []
+        max_size = max((float(file.get("size_mb") or 0.0) for file in files), default=0.0)
+        if max_size >= 500:
+            return 0.86
+        if files:
+            return 0.58
+        return 0.35
+
+    return 0.5
+
+
+def score_evidence_relevance(evidence: list[dict[str, Any]], actions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    tool_weights = {
+        "space": 55,
+        "get_host_workload": 92,
+        "get_host_cpu": 95,
+        "get_host_system_env": 95,
+        "get_host_disk": 92,
+        "get_host_inode": 78,
+        "get_disk_io": 82,
+        "get_top_processes": 82,
+        "find_large_log_files": 68,
+    }
+    has_critical = any(action.get("level") == "critical" for action in actions)
+    has_warning = any(action.get("level") == "warning" for action in actions)
+    scored = []
+
+    for item in evidence:
+        tool = str(item.get("tool") or "")
+        base = tool_weights.get(tool, 60)
+        signal = _relevance_signal(item)
+        score = base * 0.62 + signal * 100 * 0.38
+        if not item.get("success", False):
+            score = min(score, 45)
+        elif has_critical and tool in {"get_host_workload", "get_host_cpu", "get_host_system_env", "get_host_disk"}:
+            score = min(100, score + 8)
+        elif has_warning and tool in {"get_host_workload", "get_host_cpu", "get_host_disk"}:
+            score = min(100, score + 5)
+
+        enriched = dict(item)
+        enriched["relevance"] = {
+            "score": round(score, 1),
+            "label": "high" if score >= 80 else "medium" if score >= 60 else "low",
+        }
+        scored.append(enriched)
+
+    return scored
+
+
+def calculate_analysis_confidence(
+    evidence: list[dict[str, Any]],
+    actions: list[dict[str, Any]],
+    llm_result: dict[str, Any],
+) -> dict[str, Any]:
+    key_tools = {
+        "get_host_workload",
+        "get_host_cpu",
+        "get_host_system_env",
+        "get_host_disk",
+        "get_host_inode",
+        "get_disk_io",
+        "get_top_processes",
+    }
+    successful_key_tools = {
+        item.get("tool")
+        for item in evidence
+        if item.get("tool") in key_tools and item.get("success", False)
+    }
+    coverage = len(successful_key_tools) / len(key_tools)
+    relevance_scores = [
+        float((item.get("relevance") or {}).get("score") or 0.0)
+        for item in evidence
+    ]
+    avg_relevance = (sum(relevance_scores) / len(relevance_scores) / 100) if relevance_scores else 0.0
+
+    if any(action.get("level") == "critical" for action in actions):
+        rule_confidence = 0.86
+    elif any(action.get("level") == "warning" for action in actions):
+        rule_confidence = 0.78
+    else:
+        rule_confidence = 0.72
+
+    llm_confidence = float(llm_result.get("confidence") or 0.0) if llm_result.get("success") else 0.0
+    if llm_result.get("success"):
+        raw = llm_confidence * 0.50 + coverage * 0.30 + avg_relevance * 0.20
+        source = "llm+evidence"
+    else:
+        raw = rule_confidence * 0.45 + coverage * 0.35 + avg_relevance * 0.20
+        source = "rules+evidence"
+
+    score = round(max(0.0, min(raw, 1.0)) * 100, 1)
+    return {
+        "score": score,
+        "label": "high" if score >= 80 else "medium" if score >= 60 else "low",
+        "source": source,
+        "components": {
+            "evidence_coverage": round(coverage * 100, 1),
+            "avg_relevance": round(avg_relevance * 100, 1),
+            "rule_confidence": round(rule_confidence * 100, 1),
+            "llm_confidence": round(llm_confidence * 100, 1),
+        },
+    }
+
+
 def analyze_evidence(target: str, evidence: list[dict[str, Any]]) -> list[dict[str, Any]]:
     actions: list[dict[str, Any]] = []
     load15 = float(_metric(evidence, "get_host_workload", "load15", 0.0) or 0.0)
@@ -425,6 +598,8 @@ def run_full_analysis(
         "actions": rule_actions,
     }
     actions = llm_result.get("actions") or rule_actions
+    scored_evidence = score_evidence_relevance(evidence, actions)
+    confidence = calculate_analysis_confidence(scored_evidence, actions, llm_result)
     return {
         "target": resolved_target,
         "generated_at": int(time.time()),
@@ -435,5 +610,6 @@ def run_full_analysis(
             for key, value in llm_result.items()
             if key != "actions"
         },
-        "evidence": evidence,
+        "confidence": confidence,
+        "evidence": scored_evidence,
     }
